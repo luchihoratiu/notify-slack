@@ -12,15 +12,13 @@ It works with Ubuntu, macOS and Windows runners.
     needs: MY_OTHER_JOB_NAMES_GO_HERE
     runs-on: 'ubuntu-latest'
     steps:
-      - uses: luchihoratiu/notify-via-slack@dev
+      - uses: luchihoratiu/notify-via-slack@main
         with:
-          GITHUB_CONTEXT: ${{ toJson(github) }}
           SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 ```
 
 ## Settings
 ### Mandatory
-* **GITHUB_CONTEXT** - This should always be set to "**${{ toJson(github) }}**" to pass the necessary workflow information to the action.
 * **SLACK_CHANNEL** - The name of the Slack channel on which you want to be notified (without the #).
 * **SLACK_WEBHOOK_URL** - The URL provided by the [Slack Webhook integration](https://puppet.slack.com/apps/A0F7XDUAZ).
