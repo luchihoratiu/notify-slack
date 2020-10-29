@@ -1,9 +1,6 @@
 name: 'Notify via Slack'
 description: 'Notify via Slack status of workflow'
 inputs:
-  GITHUB_CONTEXT:
-    description: 'GitHub Context of targeted workflow'
-    required: true
   SLACK_CHANNEL:
     description: 'The slack channel which to notify'
     required: true
@@ -21,7 +18,7 @@ runs:
 
         jobs=$(curl \
           -sH "Accept: application/vnd.github.v3+json" \
-          https://api.github.com/repos/${{ fromJson(inputs.GITHUB_CONTEXT).repository }}/actions/runs/${{ fromJson(inputs.GITHUB_CONTEXT).run_id }}/jobs | \
+          https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs | \
           jq '.jobs | map(select(.conclusion != null))'\
         )
 
@@ -44,29 +41,29 @@ runs:
             'attachments': \
             [\
               {\
-                'author_name': '${{ fromJson(inputs.GITHUB_CONTEXT).actor }}', \
-                'author_link': 'http://github.com/${{ fromJson(inputs.GITHUB_CONTEXT).actor }}', \
-                'author_icon': 'http://github.com/${{ fromJson(inputs.GITHUB_CONTEXT).actor }}.png?size=32', \
+                'author_name': '${{ github.actor }}', \
+                'author_link': 'http://github.com/${{ github.actor }}', \
+                'author_icon': 'http://github.com/${{ github.actor }}.png?size=32', \
                 'color': '${!status}', \
                 'fields': \
                 [\
                   {\
                     'title': 'Git reference', \
-                    'value': '${{ fromJson(inputs.GITHUB_CONTEXT).ref }}', \
+                    'value': '${{ github.ref }}', \
                     'short': true, \
                   },\
                   {\
                     'title': 'Event', \
-                    'value': '${{ fromJson(inputs.GITHUB_CONTEXT).event_name }}', \
+                    'value': '${{ github.event_name }}', \
                     'short': true, \
                   },\
                   {\
-                    'title': ':ci_$status: *${{ fromJson(inputs.GITHUB_CONTEXT).repository }}*', \
-                    'value': '<http://github.com/${{ fromJson(inputs.GITHUB_CONTEXT).repository }}/actions/runs/${{ fromJson(inputs.GITHUB_CONTEXT).run_id }}|${{ fromJson(inputs.GITHUB_CONTEXT).workflow }}> workflow finished with status *$status*.', \
+                    'title': ':ci_$status: *${{ github.repository }}*', \
+                    'value': '<http://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }}> workflow finished with status *$status*.', \
                     'short': false, \
                   },\
                 ],\
-                'footer': ':githublogo: Commit SHA: <http://github.com/${{ fromJson(inputs.GITHUB_CONTEXT).repository }}/commit/${{ fromJson(inputs.GITHUB_CONTEXT).sha }}|${{ fromJson(inputs.GITHUB_CONTEXT).sha }}>', \
+                'footer': ':githublogo: Commit SHA: <http://github.com/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>', \
               },\
             ],\
           }\
