@@ -1,0 +1,13 @@
+---
+name: Testing the action
+
+on: [push]
+
+jobs:
+  notify-via-slack:
+    name: Notify workflow conclusion via Slack
+    runs-on: 'ubuntu-latest'
+    steps:
+      - uses: luchihoratiu/notify-via-slack@dev
+        with:
+          GITHUB_CONTEXT: ${{ toJson(github) }}
