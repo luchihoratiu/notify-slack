@@ -1,0 +1,74 @@
+name: 'Notify via Slack'
+description: 'Notify via Slack status of workflow'
+inputs:
+  GITHUB_CONTEXT:
+    description: 'GitHub Context of targeted workflow'
+    required: true
+  SLACK_CHANNEL:
+    description: 'The slack channel which to notify'
+    required: true
+  SLACK_WEBHOOK_URL:
+    description: 'Slack WebHook url'
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Run
+      run: |
+        success="#43c78a"
+        failure="#ed5c5c"
+        cancelled="#343434"
+
+        jobs=$(curl \
+          -sH "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/${{ fromJson(inputs.GITHUB_CONTEXT).repository }}/actions/runs/${{ fromJson(inputs.GITHUB_CONTEXT).run_id }}/jobs | \
+          jq '.jobs | map(select(.conclusion != null))'\
+        )
+
+        echo $jobs | jq '.[] .steps | .[] .conclusion' > conclusions
+
+        if grep -q "failure" conclusions; then
+          status="failure"
+        elif grep -q "cancelled" conclusions; then
+          status="cancelled"
+        elif grep -q "success" conclusions; then
+          status="success"
+        else
+          status="cancelled"
+        fi
+
+        curl -X POST --data-urlencode \
+          "payload=\
+          {\
+            'channel': '#${{ inputs.SLACK_CHANNEL }}', \
+            'attachments': \
+            [\
+              {\
+                'author_name': '${{ fromJson(inputs.GITHUB_CONTEXT).actor }}', \
+                'author_link': 'http://github.com/${{ fromJson(inputs.GITHUB_CONTEXT).actor }}', \
+                'author_icon': 'http://github.com/${{ fromJson(inputs.GITHUB_CONTEXT).actor }}.png?size=32', \
+                'color': '${!status}', \
+                'fields': \
+                [\
+                  {\
+                    'title': 'Git reference', \
+                    'value': '${{ fromJson(inputs.GITHUB_CONTEXT).ref }}', \
+                    'short': true, \
+                  },\
+                  {\
+                    'title': 'Event', \
+                    'value': '${{ fromJson(inputs.GITHUB_CONTEXT).event_name }}', \
+                    'short': true, \
+                  },\
+                  {\
+                    'title': ':ci_$status: *${{ fromJson(inputs.GITHUB_CONTEXT).repository }}*', \
+                    'value': '<http://github.com/${{ fromJson(inputs.GITHUB_CONTEXT).repository }}/actions/runs/${{ fromJson(inputs.GITHUB_CONTEXT).run_id }}|${{ fromJson(inputs.GITHUB_CONTEXT).workflow }}> workflow finished with status *$status*.', \
+                    'short': false, \
+                  },\
+                ],\
+                'footer': ':githublogo: Commit SHA: <http://github.com/${{ fromJson(inputs.GITHUB_CONTEXT).repository }}/commit/${{ fromJson(inputs.GITHUB_CONTEXT).sha }}|${{ fromJson(inputs.GITHUB_CONTEXT).sha }}>', \
+              },\
+            ],\
+          }\
+          " ${{ inputs.SLACK_WEBHOOK_URL }}
+      shell: bash
