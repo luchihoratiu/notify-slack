@@ -1,0 +1,18 @@
+---
+name: Testing the action
+
+on:
+  push:
+    branches: [ test ]
+  pull_request:
+    branches: [ test ]
+
+jobs:
+  status_check:
+    name: Status check
+    runs-on: 'ubuntu-latest'
+    steps:
+      - uses: luchihoratiu/notify-via-slack@test
+        with:
+          SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
