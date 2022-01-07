@@ -16,14 +16,51 @@ runs:
         failure="#ed5c5c"
         cancelled="#343434"
 
+        if [[ "${{ github.workflow }}" == ".github/"* ]]
+        then
+          echo "ruh roh"
+        fi
+        
+        workflows=$(curl \
+          -sH "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/${{ github.repository }}/actions/workflows | \
+          jq '.workflows | map(select(.name == "${{ github.workflow }}")) | .[] | .path')
+
+
+
+        for workflow in $workflows
+        do
+          a=($(echo "$workflow" | tr '/' '\n'))
+          modified=${a[-1]::-1}
+          run_ids=$(curl \
+            -sH "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/${modified}/runs | \
+            jq '.workflow_runs | .[] | .id')
+          
+          i=0
+          b=($(echo "$run_ids" | tr ' ' '\n'))
+          for id in $b
+          do
+            if [ $id == ${{ github.run_id }} ]; then
+              previous=${b[$((i+1))]}
+            fi
+            i=$((i+1))
+          done
+
+          if [ -n $previous ]; then
+            break
+          fi
+        done
+
         jobs=$(curl \
           -sH "Accept: application/vnd.github.v3+json" \
-          https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs | \
+          https://api.github.com/repos/${{ github.repository }}/actions/runs/${previous}/jobs | \
           jq '.jobs | map(select(.conclusion != null))'\
         )
 
         echo $jobs | jq '.[] .steps | .[] .conclusion' > conclusions
 
+        echo $conclusions
         if grep -q "failure" conclusions; then
           status="failure"
         elif grep -q "cancelled" conclusions; then
@@ -34,38 +71,38 @@ runs:
           status="cancelled"
         fi
 
-        curl -X POST --data-urlencode \
-          "payload=\
-          {\
-            'channel': '#${{ inputs.SLACK_CHANNEL }}', \
-            'attachments': \
-            [\
-              {\
-                'author_name': '${{ github.actor }}', \
-                'author_link': 'http://github.com/${{ github.actor }}', \
-                'author_icon': 'http://github.com/${{ github.actor }}.png?size=32', \
-                'color': '${!status}', \
-                'fields': \
-                [\
-                  {\
-                    'title': 'Git reference', \
-                    'value': '${{ github.ref }}', \
-                    'short': true, \
-                  },\
-                  {\
-                    'title': 'Event', \
-                    'value': '${{ github.event_name }}', \
-                    'short': true, \
-                  },\
-                  {\
-                    'title': ':ci_$status: *${{ github.repository }}*', \
-                    'value': '<http://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }}> workflow finished with status *$status*.', \
-                    'short': false, \
-                  },\
-                ],\
-                'footer': ':githublogo: Commit SHA: <http://github.com/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>', \
-              },\
-            ],\
-          }\
-          " ${{ inputs.SLACK_WEBHOOK_URL }}
+        # curl -X POST --data-urlencode \
+        #   "payload=\
+        #   {\
+        #     'channel': '#${{ inputs.SLACK_CHANNEL }}', \
+        #     'attachments': \
+        #     [\
+        #       {\
+        #         'author_name': '${{ github.actor }}', \
+        #         'author_link': 'http://github.com/${{ github.actor }}', \
+        #         'author_icon': 'http://github.com/${{ github.actor }}.png?size=32', \
+        #         'color': '${!status}', \
+        #         'fields': \
+        #         [\
+        #           {\
+        #             'title': 'Git reference', \
+        #             'value': '${{ github.ref }}', \
+        #             'short': true, \
+        #           },\
+        #           {\
+        #             'title': 'Event', \
+        #             'value': '${{ github.event_name }}', \
+        #             'short': true, \
+        #           },\
+        #           {\
+        #             'title': ':ci_$status: *${{ github.repository }}*', \
+        #             'value': '<http://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }}> workflow finished with status *$status*.', \
+        #             'short': false, \
+        #           },\
+        #         ],\
+        #         'footer': ':githublogo: Commit SHA: <http://github.com/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>', \
+        #       },\
+        #     ],\
+        #   }\
+        #  " ${{ inputs.SLACK_WEBHOOK_URL }}
       shell: bash

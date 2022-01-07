@@ -1,0 +1,16 @@
+---
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  notify-via-slack:
+    name: DUMMY
+    if: ${{ always() }}
+    runs-on: 'ubuntu-latest'
+    steps:
+      - uses: luchihoratiu/notify-via-slack@dev
+        with:
+          SLACK_CHANNEL: 'victor'
+          SLACK_WEBHOOK_URL: 'victor'
