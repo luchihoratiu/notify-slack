@@ -1,5 +1,8 @@
 name: 'Notify via Slack'
 description: 'Notify via Slack conclusion of workflow'
+branding:
+  icon: 'message-circle'  
+  color: 'yellow'
 inputs:
   SLACK_CHANNEL:
     description: 'The slack channel which to notify'
