@@ -1,71 +1,268 @@
 name: 'Notify via Slack'
-description: 'Notify via Slack status of workflow'
+description: 'Notify via Slack conclusion of workflow'
 inputs:
   SLACK_CHANNEL:
     description: 'The slack channel which to notify'
     required: true
   SLACK_WEBHOOK_URL:
-    description: 'Slack WebHook url'
+    description: 'Slack WebHook URL'
     required: true
+  NOTIFY_ONLY_ON_CONCLUSION_CHANGE:
+    description: "Set to 'true' to send notification only when conclusion differs from previous run"
+    default: 'false'
+  EXTRA_INFORMATION:
+    description: "Add here custom information to be printed besides the standard template"
 runs:
   using: "composite"
   steps:
     - name: Run
       run: |
+        #########################################
+        # Default colours used for notification
+        #
+        # TODO:
+        #   Add GHA option to overwrite them.
+        #########################################
         success="#43c78a"
         failure="#ed5c5c"
-        cancelled="#343434"
+        cancelled="#343434" 
 
-        jobs=$(curl \
-          -sH "Accept: application/vnd.github.v3+json" \
-          https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs | \
-          jq '.jobs | map(select(.conclusion != null))'\
-        )
 
-        echo $jobs | jq '.[] .steps | .[] .conclusion' > conclusions
+        #########################################
+        # Removes leading and trailling quote
+        # characters, splits input at forward 
+        # slash characters, and prints to 
+        # stdout the last element which should
+        # be the filename 
+        #
+        # Arguments:
+        #   Workflow full path
+        # Outputs:
+        #   Workflow filename with extension
+        #########################################
+        function get_workflow_filename_from_path {
+          split_path=($(echo "$1" | tr -d '"' | tr '/' '\n'))
+          echo ${split_path[-1]}
+        }
 
-        if grep -q "failure" conclusions; then
-          status="failure"
-        elif grep -q "cancelled" conclusions; then
-          status="cancelled"
-        elif grep -q "success" conclusions; then
-          status="success"
-        else
-          status="cancelled"
-        fi
 
-        curl -X POST --data-urlencode \
-          "payload=\
-          {\
-            'channel': '#${{ inputs.SLACK_CHANNEL }}', \
-            'attachments': \
-            [\
-              {\
-                'author_name': '${{ github.actor }}', \
-                'author_link': 'http://github.com/${{ github.actor }}', \
-                'author_icon': 'http://github.com/${{ github.actor }}.png?size=32', \
-                'color': '${!status}', \
-                'fields': \
-                [\
-                  {\
-                    'title': 'Git reference', \
-                    'value': '${{ github.ref }}', \
-                    'short': true, \
-                  },\
-                  {\
-                    'title': 'Event', \
-                    'value': '${{ github.event_name }}', \
-                    'short': true, \
-                  },\
-                  {\
-                    'title': ':ci_$status: *${{ github.repository }}*', \
-                    'value': '<http://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }}> workflow finished with status *$status*.', \
-                    'short': false, \
-                  },\
-                ],\
-                'footer': ':githublogo: Commit SHA: <http://github.com/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>', \
-              },\
-            ],\
-          }\
+        #########################################
+        # Prints to stdout all known run ids of
+        # the given workflow
+        #
+        # Arguments:
+        #   Workflow filename with extension
+        # Outputs:
+        #   Run ids, separated by newlines
+        #########################################        
+        function get_run_ids_from_workflow {
+          echo $(curl \
+            -sH "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/$1/runs | \
+            jq '.workflow_runs | .[] | .id')
+        }
+
+
+        #########################################
+        # Searches through given list of 
+        # workflows for current run id to
+        # identify the current workflow
+        # filename and prints it to stdout if
+        # found
+        #
+        # Arguments:
+        #   Workflow paths, separated by newlines
+        # Outputs:
+        #   Current workflow filename with 
+        #   extension
+        #########################################         
+        function identify_current_workflow {
+          for workflow in $1; do
+            workflow=$(get_workflow_filename_from_path $workflow)
+            run_ids=$(get_run_ids_from_workflow $workflow)
+
+            i=0
+            for id in $run_ids
+            do
+              if [ $id == ${{ github.run_id }} ]; then
+                echo $workflow
+                break
+              fi
+              i=$((i+1))
+            done
+          done
+        }
+
+
+        #########################################
+        # Prints to stdout the currently running
+        # GHA workflow filename with extension 
+        #
+        # Arguments:
+        #   None
+        # Outputs:
+        #   Current workflow filename with 
+        #   extension
+        #########################################             
+        function get_current_workflow {
+          if [[ "${{ github.workflow }}" == ".github/"* ]]; then
+            echo $(get_workflow_filename_from_path ${{ github.workflow }})
+          else
+            workflows=$(curl \
+              -sH "Accept: application/vnd.github.v3+json" \
+              https://api.github.com/repos/${{ github.repository }}/actions/workflows | \
+              jq '.workflows | map(select(.name == "${{ github.workflow }}")) | .[] | .path')
+
+            echo $(identify_current_workflow $workflows)
+          fi
+        }
+
+
+        #########################################
+        # Searches for the currently running job
+        # id and prints to stdout the job id that
+        # precedes it cronologically
+        #
+        # Arguments:
+        #   Workflow filename with extension
+        # Outputs:
+        #   ID number of previous run
+        ######################################### 
+        function find_previous {
+          run_ids=$(get_run_ids_from_workflow $1)
+
+          i=0
+          for id in $run_ids; do
+            i=$((i+1))
+            if [ $id == ${{ github.run_id }} ]; then
+              IFS=' ' read -r -a arr <<< "$run_ids"
+              echo ${arr[$i]}
+              break
+            fi
+          done
+        }
+
+
+        #########################################
+        # Determines final conclusion of given GHA
+        # run and prints it to stdout
+        #
+        # Arguments:
+        #   ID number of job run
+        # Outputs:
+        #   Conclusion of given job.
+        #   Possibilities:
+        #     - failure
+        #     - cancelled
+        #     - success
+        ######################################### 
+        function determine_conclusion {
+          jobs=$(curl \
+            -sH "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/runs/$1/jobs | \
+            jq '.jobs | map(select(.conclusion != null))'\
+          )
+          echo $jobs | jq '.[] .steps | .[] .conclusion' > conclusions
+
+          if grep -q "failure" conclusions; then
+            final_conclusion="failure"
+          elif grep -q "cancelled" conclusions; then
+            final_conclusion="cancelled"
+          elif grep -q "success" conclusions; then
+            final_conclusion="success"
+          else
+            final_conclusion="cancelled"
+          fi
+
+          echo $final_conclusion
+        }
+
+
+        #########################################
+        # Sends Slack notification with given
+        # conclusion
+        #
+        # Arguments:
+        #   conclusion/Conclusion to send
+        # Outputs:
+        #   None
+        ######################################### 
+        function send_notification {
+          conclusion=$1
+          if ! [ -z ${{ inputs.EXTRA_INFORMATION }} ]; then  
+            more_information="{\
+                            'title': 'More information:', \
+                            'value': '${{ inputs.EXTRA_INFORMATION }}', \
+                            'short': false, \
+                          },"
+          fi
+
+          curl -X POST --data-urlencode \
+            "payload=\
+            {\
+              'channel': '#${{ inputs.SLACK_CHANNEL }}', \
+              'attachments': \
+              [\
+                {\
+                  'author_name': '${{ github.actor }}', \
+                  'author_link': 'http://github.com/${{ github.actor }}', \
+                  'author_icon': 'http://github.com/${{ github.actor }}.png?size=32', \
+                  'color': '${!conclusion}', \
+                  'fields': \
+                  [\
+                    {\
+                      'title': 'Git reference', \
+                      'value': '${{ github.ref }}', \
+                      'short': true, \
+                    },\
+                    {\
+                      'title': 'Event', \
+                      'value': '${{ github.event_name }}', \
+                      'short': true, \
+                    },\
+                    {\
+                      'title': ':ci_$conclusion: *${{ github.repository }}*', \
+                      'value': '<http://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }}> workflow finished with conclusion *$conclusion*.', \
+                      'short': false, \
+                    },\
+                    $more_information
+                  ],\
+                  'footer': ':githublogo: Commit SHA: <http://github.com/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>', \
+                },\
+              ],\
+            }\
           " ${{ inputs.SLACK_WEBHOOK_URL }}
+        }
+
+
+        #########################################
+        # Main function
+        #
+        # Arguments:
+        #   None
+        # Outputs:
+        #   Prints to stdout whether a 
+        #   notification is being sent or not
+        ######################################### 
+        function main {
+          current_run_id=${{ github.run_id }}
+          current_run_conclusion=$(determine_conclusion $current_run_id)
+
+          if [[ ${{ inputs.NOTIFY_ONLY_ON_CONCLUSION_CHANGE }} == 'true' ]]; then
+            current_workflow=$(get_current_workflow)
+            previous_run_id=$(find_previous $current_workflow)
+            previous_run_conclusion=$(determine_conclusion $previous_run_id)
+
+            if [[ $current_run_conclusion == $previous_run_conclusion ]]; then
+              echo 'The conclusion of the last run matches current. NOT sending any notification!'
+              exit 0
+            fi
+          fi
+
+          echo 'Sending notification...'
+          send_notification $current_run_conclusion
+        }
+        
+        main
+
       shell: bash
